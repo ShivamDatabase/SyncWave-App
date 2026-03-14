@@ -18,10 +18,12 @@ interface Props {
   canControl: boolean;
   onGiveControl: (userId: string) => void;
   onRemoveUser: (userId: string) => void;
+  onMuteUser: (userId: string) => void;
+  onTransferOwnership: (userId: string) => void;
 }
 
 export default function UsersList({
-  users, adminId, currentUserId, controlledBy, speakingUsers, canControl, onGiveControl, onRemoveUser,
+  users, adminId, currentUserId, controlledBy, speakingUsers, canControl, onGiveControl, onRemoveUser, onMuteUser, onTransferOwnership
 }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -78,21 +80,41 @@ export default function UsersList({
               </div>
 
               {/* Admin actions */}
-              {canControl && !isSelf && (
+              {canControl && !isSelf && !isAdmin && (
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {!isAdmin && (
-                    <button className="btn-icon tooltip" data-tip={hasControl ? 'Revoke control' : 'Give control'}
-                      onClick={() => onGiveControl(user._id)}
-                      style={{ width: 28, height: 28, fontSize: 13, background: hasControl ? 'var(--green-glow)' : undefined }}>
-                      🎮
-                    </button>
+                  {user._id === currentUserId && (
+                    <></> /* placeholder if we ever need self actions */
                   )}
-                  {!isAdmin && (
-                    <button className="btn-icon tooltip" data-tip="Remove user"
-                      onClick={() => onRemoveUser(user._id)}
-                      style={{ width: 28, height: 28, fontSize: 13, background: 'rgba(239,68,68,0.15)', color: 'var(--danger)' }}>
-                      ✕
-                    </button>
+                  {user._id === adminId && (
+                     <></> /* You cannot perform actions on the admin */
+                  )}
+                  {adminId === currentUserId && (
+                    <>
+                      <button className="btn-icon tooltip" data-tip="Make Admin"
+                        onClick={() => {
+                          if (confirm(`Are you sure you want to transfer Admin to ${user.name}? You will lose your admin privileges.`)) {
+                            onTransferOwnership(user._id);
+                          }
+                        }}
+                        style={{ width: 28, height: 28, fontSize: 13, background: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)' }}>
+                        👑
+                      </button>
+                      <button className="btn-icon tooltip" data-tip={user.isMuted ? 'Muted' : 'Force Mute'}
+                        onClick={() => onMuteUser(user._id)}
+                        style={{ width: 28, height: 28, fontSize: 13, background: user.isMuted ? 'rgba(239,68,68,0.15)' : 'var(--bg-hover)', color: user.isMuted ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                        {user.isMuted ? '🔇' : '🎙️'}
+                      </button>
+                      <button className="btn-icon tooltip" data-tip={hasControl ? 'Revoke DJ' : 'Make DJ'}
+                        onClick={() => onGiveControl(user._id)}
+                        style={{ width: 28, height: 28, fontSize: 13, background: hasControl ? 'var(--green-glow)' : undefined }}>
+                        🎮
+                      </button>
+                      <button className="btn-icon tooltip" data-tip="Remove user"
+                        onClick={() => onRemoveUser(user._id)}
+                        style={{ width: 28, height: 28, fontSize: 13, background: 'rgba(239,68,68,0.15)', color: 'var(--danger)' }}>
+                        ✕
+                      </button>
+                    </>
                   )}
                 </div>
               )}

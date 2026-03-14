@@ -287,8 +287,9 @@ module.exports = (io) => {
                 if (!room) return;
                 const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
                 if (adminId !== userId) return;
+                if (targetUserId === adminId) return; // Prevent actions against Admin
 
-                room.controlledBy = targetUserId === adminId ? null : targetUserId;
+                room.controlledBy = room.controlledBy === targetUserId ? null : targetUserId;
                 await room.save();
 
                 io.to(roomCode).emit('admin:control-changed', { controlledBy: room.controlledBy });
@@ -306,6 +307,7 @@ module.exports = (io) => {
                 if (!room) return;
                 const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
                 if (adminId !== userId) return;
+                if (targetUserId === adminId) return; // Prevent actions against Admin
 
                 const targetUser = room.users.find((u) => u._id === targetUserId);
                 if (targetUser && !room.bannedUsers.includes(targetUserId)) {
@@ -325,6 +327,60 @@ module.exports = (io) => {
 
                 io.to(roomCode).emit('users-updated', { users: room.users });
                 io.to(roomCode).emit('activity-log', { log: room.activityLog });
+            } catch (err) {
+                socket.emit('error', { message: err.message });
+            }
+        });
+
+        socket.on('admin:mute-user', async ({ roomCode, targetUserId }) => {
+            try {
+                const room = await Room.findOne({ code: roomCode });
+                if (!room) return;
+                const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
+                if (adminId !== userId) return;
+                if (targetUserId === adminId) return; // Prevent actions against Admin
+
+                const targetUser = room.users.find((u) => u._id === targetUserId);
+                if (targetUser) {
+                    targetUser.isMuted = !targetUser.isMuted;
+                    
+                    if (targetUser.isMuted) {
+                        io.to(targetUser.socketId).emit('admin:force-mute');
+                    }
+                    
+                    await addActivity(room, 'mute', `${socket.user.name} ${targetUser.isMuted ? 'muted' : 'unmuted'} ${targetUser.name}`, userInfo);
+                    await room.save();
+                    
+                    io.to(roomCode).emit('users-updated', { users: room.users });
+                    io.to(roomCode).emit('activity-log', { log: room.activityLog });
+                }
+            } catch (err) {
+                socket.emit('error', { message: err.message });
+            }
+        });
+
+        socket.on('admin:transfer-ownership', async ({ roomCode, targetUserId }) => {
+            try {
+                const room = await Room.findOne({ code: roomCode });
+                if (!room) return;
+                const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
+                if (adminId !== userId) return;
+                if (targetUserId === adminId) return;
+
+                const targetUser = room.users.find((u) => u._id === targetUserId);
+                if (targetUser) {
+                    room.admin = targetUserId;
+                    if (room.controlledBy === targetUserId) {
+                        room.controlledBy = null;
+                    }
+                    
+                    await addActivity(room, 'transfer', `${socket.user.name} transferred Admin ownership to ${targetUser.name}`, userInfo);
+                    await room.save();
+                    
+                    // Broadcast new state so all clients see the new Admin
+                    io.to(roomCode).emit('room-state', { room });
+                    io.to(roomCode).emit('activity-log', { log: room.activityLog });
+                }
             } catch (err) {
                 socket.emit('error', { message: err.message });
             }
@@ -355,6 +411,21 @@ module.exports = (io) => {
 
                 const room = await Room.findOne({ code: roomCode });
                 if (!room) return;
+
+                const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
+                if (adminId === userId) {
+                    // Admin left -> close room
+                    io.to(roomCode).emit('room:closed');
+                    await Room.deleteOne({ _id: room._id });
+                    
+                    // Force disconnect everyone else's sockets from this room
+                    const socketsInRoom = await io.in(roomCode).fetchSockets();
+                    for (const s of socketsInRoom) {
+                        s.leave(roomCode);
+                        s.emit('voice:peer-disconnected', { socketId: s.id, userId: s.user._id });
+                    }
+                    return;
+                }
 
                 room.users = room.users.filter((u) => u._id !== userId);
                 await addActivity(room, 'leave', `${socket.user.name} left the room`, userInfo);

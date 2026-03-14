@@ -21,6 +21,7 @@ export type RepeatMode = 'none' | 'one' | 'all';
 
 interface Props {
   currentSong: Song | null;
+  actualDuration?: number | null;
   playbackState: PlaybackState;
   canControl: boolean;
   currentTime: number;
@@ -39,7 +40,7 @@ interface Props {
 }
 
 export default function PlayerControls({
-  currentSong, playbackState, canControl, currentTime,
+  currentSong, actualDuration, playbackState, canControl, currentTime,
   queueLength, currentIndex,
   onPlay, onPause, onSkip, onSeek,
   volume, onVolumeChange,
@@ -71,7 +72,9 @@ export default function PlayerControls({
     return () => clearInterval(interval);
   }, [playbackState.isPlaying, isSeeking]);
 
-  const duration = currentSong
+  const duration = actualDuration
+    ? actualDuration
+    : currentSong
     ? parseFloat(currentSong.duration || '0') || 240
     : 240;
 
@@ -217,7 +220,7 @@ export default function PlayerControls({
       </div>
 
       {/* Main Controls Row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px 12px' }}>
 
         {/* Left — shuffle + repeat */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 90 }}>

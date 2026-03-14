@@ -20,6 +20,7 @@ interface Props {
   canControl: boolean;
   volume: number;
   onTimeUpdate: (time: number) => void;
+  onDurationChange?: (duration: number) => void;
   onEnded: () => void;
   onError?: () => void;          // called when video can't be played
   onPlay: (time: number) => void;
@@ -45,7 +46,7 @@ function safeCall(player: YT.Player | null, method: string, ...args: any[]) {
 
 export default function YouTubePlayer({
   videoId, playbackState, canControl, volume,
-  onTimeUpdate, onEnded, onError, onPlay, onPause, onReady,
+  onTimeUpdate, onDurationChange, onEnded, onError, onPlay, onPause, onReady,
 }: Props) {
   const playerRef    = useRef<YT.Player | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -108,6 +109,10 @@ export default function YouTubePlayer({
             onReadyRef.current();
             if (intervalRef.current) clearInterval(intervalRef.current);
             intervalRef.current = setInterval(() => {
+              const dt = (playerRef.current as any)?.getDuration?.();
+              if (typeof dt === 'number' && dt > 0) {
+                onDurationChange?.(dt);
+              }
               const t = (playerRef.current as any)?.getCurrentTime?.();
               if (typeof t === 'number') onTimeUpdate(t);
             }, 1000);
@@ -142,7 +147,21 @@ export default function YouTubePlayer({
       window.onYouTubeIframeAPIReady = initPlayer;
     }
 
+    // Workaround for strict browser autoplay policies:
+    // Because Play requests come from WebSockets, the browser considers them non-user-gestures 
+    // and forces it to be muted. Any click anywhere on the page can securely perform the unMute.
+    const unlockAudio = () => {
+      if (isReadyRef.current && playerRef.current) {
+        safeCall(playerRef.current, 'unMute');
+        safeCall(playerRef.current, 'setVolume', volumeRef.current);
+      }
+    };
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('touchstart', unlockAudio);
+
     return () => {
+      document.removeEventListener('click', unlockAudio);
+      document.removeEventListener('touchstart', unlockAudio);
       if (intervalRef.current) clearInterval(intervalRef.current);
       isReadyRef.current = false;
       playerRef.current = null;

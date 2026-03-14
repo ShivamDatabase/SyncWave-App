@@ -197,7 +197,9 @@ img { max-width: 100%; }
 @media (max-width: 900px) {
   .mobile-tabs { display: flex !important; background: var(--bg-card); border-bottom: 1px solid var(--border); }
   .grid-to-flex { display: flex !important; flex-direction: column !important; }
-  .desktop-flex { display: none !important; }
+  .desktop-flex { display: none; }
+  .desktop-flex.mobile-active { display: flex !important; flex: 1; }
+  header { padding: 10px 14px !important; }
 }
 
 @media (min-width: 901px) {

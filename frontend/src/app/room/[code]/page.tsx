@@ -90,6 +90,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const [mobilePanel, setMobilePanel] = useState<'player' | 'playlist' | 'users'>('player');
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<RepeatMode>('none');
+  const [actualDuration, setActualDuration] = useState<number | null>(null);
   const roomCode = code.toUpperCase();
 
   const isAdmin = user?._id === room.admin;
@@ -124,11 +125,12 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     socket.on('activity-log', ({ log }) => dispatch({ type: 'ACTIVITY_LOG', payload: log }));
     socket.on('chat:message', (msg) => setMessages(prev => [...prev.slice(-200), msg]));
     socket.on('kicked', () => { toast('You were removed from the room', 'error'); router.push('/'); });
+    socket.on('room:closed', () => { toast('Room was closed by the admin', 'error'); router.push('/'); });
     socket.on('error', ({ message }) => toast(message, 'error'));
 
     return () => {
       ['room-state','users-updated','playback:state','playback:seek','playlist:song-changed',
-       'playlist:updated','admin:control-changed','activity-log','chat:message','kicked','error']
+       'playlist:updated','admin:control-changed','activity-log','chat:message','kicked', 'room:closed', 'error']
         .forEach(e => socket.off(e));
     };
   }, [socket, user, loading, roomCode, router]);
@@ -217,8 +219,8 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
 
         {/* LEFT: Playlist */}
         <div style={{ 
-          borderRight: '1px solid var(--border)', display: mobilePanel === 'playlist' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)'
-        }} className="desktop-flex">
+          borderRight: '1px solid var(--border)', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)'
+        }} className={`desktop-flex ${mobilePanel === 'playlist' ? 'mobile-active' : ''}`}>
           <PlaylistPanel
             playlist={room.playlist}
             currentSongIndex={room.currentSongIndex}
@@ -234,8 +236,8 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
 
         {/* CENTER: Player */}
         <div style={{ 
-          display: mobilePanel === 'player' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-primary)'
-        }} className="desktop-flex">
+          flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-primary)'
+        }} className={`desktop-flex ${mobilePanel === 'player' ? 'mobile-active' : ''}`}>
           {/* Video Area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', gap: 12, overflow: 'hidden' }}>
             <YouTubePlayer
@@ -244,6 +246,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               canControl={canControl}
               volume={volume}
               onTimeUpdate={t => setCurrentTime(t)}
+              onDurationChange={d => setActualDuration(d)}
               onEnded={() => emit('playback:song-ended', {})}
               onError={() => toast('This video cannot be embedded. Skipping…', 'error')}
               onPlay={t => emit('playback:play', { currentTime: t })}
@@ -258,6 +261,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           {/* Player Controls */}
           <PlayerControls
             currentSong={currentSong}
+            actualDuration={actualDuration}
             playbackState={room.playbackState}
             canControl={canControl}
             currentTime={currentTime}
@@ -278,8 +282,8 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
 
         {/* RIGHT: Users + Chat */}
         <div style={{ 
-          borderLeft: '1px solid var(--border)', display: mobilePanel === 'users' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)'
-        }} className="desktop-flex">
+          borderLeft: '1px solid var(--border)', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)'
+        }} className={`desktop-flex ${mobilePanel === 'users' ? 'mobile-active' : ''}`}>
           {/* Users List - top half */}
           <div style={{ flex: '0 0 auto', maxHeight: '35%', borderBottom: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <UsersList
@@ -291,6 +295,8 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
               canControl={isAdmin}
               onGiveControl={uid => emit('admin:give-control', { targetUserId: uid })}
               onRemoveUser={uid => emit('admin:remove-user', { targetUserId: uid })}
+              onMuteUser={uid => emit('admin:mute-user', { targetUserId: uid })}
+              onTransferOwnership={uid => emit('admin:transfer-ownership', { targetUserId: uid })}
             />
           </div>
 
