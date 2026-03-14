@@ -41,6 +41,10 @@ module.exports = (io) => {
                 const room = await Room.findOne({ code: roomCode.toUpperCase() });
                 if (!room) return socket.emit('error', { message: 'Room not found' });
 
+                if (room.bannedUsers.includes(userId)) {
+                    return socket.emit('error', { message: 'You are banned from this room' });
+                }
+
                 socket.join(roomCode);
 
                 // Add or update user in room
@@ -304,12 +308,19 @@ module.exports = (io) => {
                 if (adminId !== userId) return;
 
                 const targetUser = room.users.find((u) => u._id === targetUserId);
+                if (targetUser && !room.bannedUsers.includes(targetUserId)) {
+                    room.bannedUsers.push(targetUserId);
+                }
                 room.users = room.users.filter((u) => u._id !== targetUserId);
 
-                const targetSocket = room.users.find((u) => u._id === targetUserId)?.socketId;
-                if (targetSocket) io.to(targetSocket).emit('kicked', { message: 'You were removed from the room' });
+                const targetSocket = room.users.find((u) => u._id === targetUserId)?.socketId || targetUser?.socketId;
+                if (targetSocket) {
+                    io.to(targetSocket).emit('kicked', { message: 'You were removed from the room' });
+                    const tSocket = io.sockets.sockets.get(targetSocket);
+                    if (tSocket) tSocket.leave(roomCode);
+                }
 
-                await addActivity(room, 'kick', `${socket.user.name} removed ${targetUser?.name}`, userInfo);
+                await addActivity(room, 'kick', `${socket.user.name} removed ${targetUser?.name || 'User'}`, userInfo);
                 await room.save();
 
                 io.to(roomCode).emit('users-updated', { users: room.users });

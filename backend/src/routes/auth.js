@@ -32,6 +32,8 @@ router.post('/login', async (req, res) => {
         const user = await User.findOne({ email });
         if (!user || !user.password) return res.status(400).json({ message: 'Invalid credentials' });
 
+        if (user.isBanned) return res.status(403).json({ message: 'Your account has been banned.' });
+
         const valid = await user.comparePassword(password);
         if (!valid) return res.status(400).json({ message: 'Invalid credentials' });
 

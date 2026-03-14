@@ -182,7 +182,7 @@ export default function YouTubePlayer({
   }, [playbackState, videoId]);
 
   return (
-    <div style={{ width: '100%', aspectRatio: '16/9', background: '#000', borderRadius: 'var(--radius)', overflow: 'hidden', position: 'relative' }}>
+    <div id="youtube-player-container" style={{ width: '100%', aspectRatio: '16/9', background: '#000', borderRadius: 'var(--radius)', overflow: 'hidden', position: 'relative' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
       {/* Error overlay */}

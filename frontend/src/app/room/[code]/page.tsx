@@ -86,7 +86,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(70);
   const [loading, setLoading] = useState(true);
-  const [voiceJoined, setVoiceJoined] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'activity'>('chat');
   const [mobilePanel, setMobilePanel] = useState<'player' | 'playlist' | 'users'>('player');
   const [shuffle, setShuffle] = useState(false);
@@ -97,7 +96,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
   const canControl = isAdmin || user?._id === room.controlledBy;
   const currentSong = room.playlist[room.currentSongIndex] ?? null;
 
-  const { isMuted, toggleMute, speakingUsers, micError, startVoice } = useVoiceChat({
+  const { isMuted, toggleMute, speakingUsers, micError, startVoice, isJoined } = useVoiceChat({
     socket, roomCode, userId: user?._id || '', users: room.users,
   });
 
@@ -159,7 +158,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
 
   const handleJoinVoice = async () => {
     await startVoice();
-    setVoiceJoined(true);
   };
 
   if (authLoading || loading) {
@@ -215,10 +213,12 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
       </div>
 
       {/* Main Layout */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 300px', overflow: 'hidden', minHeight: 0 }}>
+      <div className="grid-to-flex" style={{ flex: 1, display: 'grid', gridTemplateColumns: '280px 1fr 300px', overflow: 'hidden', minHeight: 0 }}>
 
         {/* LEFT: Playlist */}
-        <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)' }}>
+        <div style={{ 
+          borderRight: '1px solid var(--border)', display: mobilePanel === 'playlist' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)'
+        }} className="desktop-flex">
           <PlaylistPanel
             playlist={room.playlist}
             currentSongIndex={room.currentSongIndex}
@@ -233,7 +233,9 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         </div>
 
         {/* CENTER: Player */}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-primary)' }}>
+        <div style={{ 
+          display: mobilePanel === 'player' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-primary)'
+        }} className="desktop-flex">
           {/* Video Area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', gap: 12, overflow: 'hidden' }}>
             <YouTubePlayer
@@ -275,7 +277,9 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
         </div>
 
         {/* RIGHT: Users + Chat */}
-        <div style={{ borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)' }}>
+        <div style={{ 
+          borderLeft: '1px solid var(--border)', display: mobilePanel === 'users' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)'
+        }} className="desktop-flex">
           {/* Users List - top half */}
           <div style={{ flex: '0 0 auto', maxHeight: '35%', borderBottom: '1px solid var(--border)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <UsersList
@@ -295,7 +299,7 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
             isMuted={isMuted}
             onToggleMute={toggleMute}
             onJoinVoice={handleJoinVoice}
-            isJoined={voiceJoined}
+            isJoined={isJoined}
             micError={micError}
           />
 
@@ -340,16 +344,6 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
           )}
         </div>
       </div>
-
-      {/* Mobile responsive styles */}
-      <style>{`
-        @media (max-width: 900px) {
-          .mobile-tabs { display: flex !important; background: var(--bg-card); border-bottom: 1px solid var(--border); }
-        }
-        @media (max-width: 900px) {
-          div[style*="gridTemplateColumns"] { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
     </div>
   );
 }

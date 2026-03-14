@@ -7,6 +7,8 @@ interface User {
     name: string;
     email: string;
     avatar: string;
+    role: 'admin' | 'moderator' | 'user';
+    isBanned: boolean;
 }
 
 interface AuthCtx {

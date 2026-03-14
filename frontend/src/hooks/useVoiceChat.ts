@@ -13,6 +13,7 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
   const [isMuted, setIsMuted] = useState(true); // start muted
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
   const [micError, setMicError] = useState<string | null>(null);
+  const [isJoined, setIsJoined] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -89,10 +90,20 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
       users.forEach(u => {
         if (u._id !== userId && u.socketId) createPeer(u.socketId, true);
       });
+      
+      setIsJoined(true);
+      sessionStorage.setItem(`voice_joined_${roomCode}`, 'true');
     } catch (e: any) {
       setMicError(e.message || 'Microphone access denied');
     }
-  }, [users, userId, isMuted, startSpeakingDetection, createPeer]);
+  }, [users, userId, isMuted, startSpeakingDetection, createPeer, roomCode]);
+
+  // Auto-reconnect on mount if they were in voice before refresh
+  useEffect(() => {
+    if (socket && sessionStorage.getItem(`voice_joined_${roomCode}`) === 'true') {
+      startVoice();
+    }
+  }, [socket, roomCode, startVoice]);
 
   const toggleMute = useCallback(() => {
     setIsMuted(prev => {
@@ -157,5 +168,5 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
     };
   }, [stopSpeakingDetection]);
 
-  return { isMuted, toggleMute, speakingUsers, micError, startVoice };
+  return { isMuted, toggleMute, speakingUsers, micError, startVoice, isJoined };
 }

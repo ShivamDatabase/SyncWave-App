@@ -192,3 +192,15 @@ img { max-width: 100%; }
   transition: opacity 0.15s;
 }
 .tooltip:hover::after { opacity: 1; }
+
+/* Responsive Utility Classes for Room Page */
+@media (max-width: 900px) {
+  .mobile-tabs { display: flex !important; background: var(--bg-card); border-bottom: 1px solid var(--border); }
+  .grid-to-flex { display: flex !important; flex-direction: column !important; }
+  .desktop-flex { display: none !important; }
+}
+
+@media (min-width: 901px) {
+  .desktop-flex { display: flex !important; }
+  .mobile-tabs { display: none !important; }
+}

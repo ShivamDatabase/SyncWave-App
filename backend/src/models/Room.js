@@ -37,6 +37,7 @@ const roomSchema = new mongoose.Schema({
         socketId: String,
         isMuted: { type: Boolean, default: false },
     }],
+    bannedUsers: [{ type: String }],
     activityLog: [activitySchema],
 }, { timestamps: true });
 

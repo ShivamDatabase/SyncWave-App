@@ -7,6 +7,8 @@ const userSchema = new mongoose.Schema({
     password: { type: String },
     avatar: { type: String, default: '' },
     googleId: { type: String },
+    role: { type: String, enum: ['admin', 'moderator', 'user'], default: 'user' },
+    isBanned: { type: Boolean, default: false },
 }, { timestamps: true });
 
 userSchema.pre('save', async function () {
@@ -19,7 +21,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 userSchema.methods.toPublic = function () {
-    return { _id: this._id, name: this.name, email: this.email, avatar: this.avatar };
+    return { _id: this._id, name: this.name, email: this.email, avatar: this.avatar, role: this.role, isBanned: this.isBanned };
 };
 
 module.exports = mongoose.model('User', userSchema);

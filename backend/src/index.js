@@ -7,6 +7,7 @@ const connectDB = require('./config/db');
 const authRoutes = require('./routes/auth');
 const roomRoutes = require('./routes/rooms');
 const youtubeRoutes = require('./routes/youtube');
+const adminRoutes = require('./routes/admin');
 const socketHandler = require('./socket');
 
 connectDB();
@@ -33,6 +34,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/youtube', youtubeRoutes);
+app.use('/api/admin', adminRoutes);
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const server = http.createServer(app);

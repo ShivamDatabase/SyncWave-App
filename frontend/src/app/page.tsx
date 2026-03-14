@@ -85,6 +85,15 @@ export default function HomePage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>👋 {user.name}</span>
+            {user.role === 'admin' && (
+              <button 
+                className="btn btn-secondary" 
+                style={{ fontSize: 12, padding: '6px 14px', background: 'var(--accent-glow)', color: 'var(--accent-light)', borderColor: 'var(--accent)' }} 
+                onClick={() => router.push('/admin')}
+              >
+                👑 Admin Panel
+              </button>
+            )}
             <button className="btn btn-secondary" style={{ fontSize: 12, padding: '6px 14px' }} onClick={logout}>Sign Out</button>
           </div>
         </nav>

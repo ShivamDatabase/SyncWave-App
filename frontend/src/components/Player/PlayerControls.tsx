@@ -104,6 +104,16 @@ export default function PlayerControls({
     window.addEventListener('mouseup', onUp);
   };
 
+  const handleFullscreen = () => {
+    const playerEl = document.getElementById('youtube-player-container');
+    if (!playerEl) return;
+    if (!document.fullscreenElement) {
+      playerEl.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  };
+
   const repeatIcon = repeat === 'none' ? '🔁' : repeat === 'all' ? '🔁' : '🔂';
   const repeatLabel = repeat === 'none' ? 'No repeat' : repeat === 'all' ? 'Repeat all' : 'Repeat one';
 
@@ -310,6 +320,13 @@ export default function PlayerControls({
           <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 28, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
             {volume}%
           </span>
+          <button
+            onClick={handleFullscreen}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'var(--text-muted)', marginLeft: 8 }}
+            title="Toggle Fullscreen"
+          >
+            ⛶
+          </button>
         </div>
 
       </div>
