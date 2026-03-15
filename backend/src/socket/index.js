@@ -28,6 +28,10 @@ async function addActivity(room, type, message, userInfo) {
     if (room.activityLog.length > 50) room.activityLog = room.activityLog.slice(0, 50);
 }
 
+// Track disconnection timeouts to allow for refreshes
+const disconnectTimeouts = new Map(); // roomCode -> setTimeout ID
+const userDisconnectTimeouts = new Map(); // userId -> setTimeout ID
+
 module.exports = (io) => {
     io.use(authenticateSocket);
 
@@ -43,6 +47,18 @@ module.exports = (io) => {
 
                 if (room.bannedUsers.includes(userId)) {
                     return socket.emit('error', { message: 'You are banned from this room' });
+                }
+
+                // If there was a pending cleanup for this room (because admin left), cancel it
+                if (disconnectTimeouts.has(roomCode.toUpperCase())) {
+                    clearTimeout(disconnectTimeouts.get(roomCode.toUpperCase()));
+                    disconnectTimeouts.delete(roomCode.toUpperCase());
+                }
+
+                // If there was a pending cleanup for this user, cancel it
+                if (userDisconnectTimeouts.has(userId)) {
+                    clearTimeout(userDisconnectTimeouts.get(userId));
+                    userDisconnectTimeouts.delete(userId);
                 }
 
                 socket.join(roomCode);
@@ -409,33 +425,55 @@ module.exports = (io) => {
                 const roomCode = socket.roomCode;
                 if (!roomCode) return;
 
-                const room = await Room.findOne({ code: roomCode });
-                if (!room) return;
+                // Set a 30-second grace period before cleaning up
+                const timeoutId = setTimeout(async () => {
+                    try {
+                        const room = await Room.findOne({ code: roomCode });
+                        if (!room) return;
 
-                const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
-                if (adminId === userId) {
-                    // Admin left -> close room
-                    io.to(roomCode).emit('room:closed');
-                    await Room.deleteOne({ _id: room._id });
-                    
-                    // Force disconnect everyone else's sockets from this room
-                    const socketsInRoom = await io.in(roomCode).fetchSockets();
-                    for (const s of socketsInRoom) {
-                        s.leave(roomCode);
-                        s.emit('voice:peer-disconnected', { socketId: s.id, userId: s.user._id });
+                        const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
+                        if (adminId === userId) {
+                            // Admin actually left after grace period -> close room
+                            io.to(roomCode).emit('room:closed');
+                            await Room.deleteOne({ _id: room._id });
+                            
+                            // Force disconnect everyone else's sockets from this room
+                            const socketsInRoom = await io.in(roomCode).fetchSockets();
+                            for (const s of socketsInRoom) {
+                                s.leave(roomCode);
+                                if (s.user) {
+                                    s.emit('voice:peer-disconnected', { socketId: s.id, userId: s.user._id });
+                                }
+                            }
+                            disconnectTimeouts.delete(roomCode);
+                            return;
+                        }
+
+                        // Just a regular user left
+                        room.users = room.users.filter((u) => u._id !== userId);
+                        await addActivity(room, 'leave', `${socket.user.name} left the room (timeout)`, userInfo);
+                        await room.save();
+
+                        io.to(roomCode).emit('users-updated', { users: room.users });
+                        io.to(roomCode).emit('activity-log', { log: room.activityLog });
+
+                        // Notify peers to close WebRTC connection
+                        socket.to(roomCode).emit('voice:peer-disconnected', { socketId: socket.id, userId });
+                        userDisconnectTimeouts.delete(userId);
+                    } catch (err) {
+                        console.error('Cleanup error:', err.message);
                     }
-                    return;
+                }, 30000); // 30 seconds
+
+                const room = await Room.findOne({ code: roomCode });
+                if (room) {
+                    const adminId = room.admin._id ? room.admin._id.toString() : room.admin.toString();
+                    if (adminId === userId) {
+                        disconnectTimeouts.set(roomCode, timeoutId);
+                    } else {
+                        userDisconnectTimeouts.set(userId, timeoutId);
+                    }
                 }
-
-                room.users = room.users.filter((u) => u._id !== userId);
-                await addActivity(room, 'leave', `${socket.user.name} left the room`, userInfo);
-                await room.save();
-
-                io.to(roomCode).emit('users-updated', { users: room.users });
-                io.to(roomCode).emit('activity-log', { log: room.activityLog });
-
-                // Notify peers to close WebRTC connection
-                socket.to(roomCode).emit('voice:peer-disconnected', { socketId: socket.id, userId });
             } catch (err) {
                 console.error('Disconnect error:', err.message);
             }

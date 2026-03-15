@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useSocket } from '@/context/SocketContext';
 import { useVoiceChat } from '@/hooks/useVoiceChat';
 import api from '@/lib/api';
+import { setActiveRoomCode } from '@/lib/roomUtils';
 import YouTubePlayer from '@/components/Player/YouTubePlayer';
 import PlayerControls, { RepeatMode } from '@/components/Player/PlayerControls';
 import PlaylistPanel from '@/components/Playlist/PlaylistPanel';
@@ -107,8 +108,16 @@ export default function RoomPage({ params }: { params: Promise<{ code: string }>
     if (!user) { router.push('/auth'); return; }
 
     api.get(`/rooms/${roomCode}`)
-      .then(r => { dispatch({ type: 'SET_ROOM', payload: r.data.room }); setLoading(false); })
-      .catch(() => { toast('Room not found', 'error'); router.push('/'); });
+      .then(r => { 
+        dispatch({ type: 'SET_ROOM', payload: r.data.room }); 
+        setActiveRoomCode(roomCode);
+        setLoading(false); 
+      })
+      .catch(() => { 
+        toast('Room not found', 'error'); 
+        setActiveRoomCode(null);
+        router.push('/'); 
+      });
   }, [roomCode, user, authLoading, router]);
 
   useEffect(() => {

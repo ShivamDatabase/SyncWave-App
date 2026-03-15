@@ -1,6 +1,6 @@
-'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
+import { setVoiceJoined, isVoiceJoined } from '@/lib/roomUtils';
 
 interface UseVoiceChatOptions {
   socket: Socket | null;
@@ -22,6 +22,9 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
   const ignoreOfferRef = useRef<Map<string, boolean>>(new Map());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserTimer = useRef<NodeJS.Timeout | null>(null);
+  const candidatesBufferRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const offersBufferRef = useRef<Map<string, any>>(new Map());
+  const signalingReadyRef = useRef(isVoiceJoined(roomCode));
 
   const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -55,6 +58,7 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
 
   const createPeer = useCallback((targetSocketId: string, initiator: boolean) => {
     if (peersRef.current.has(targetSocketId)) return peersRef.current.get(targetSocketId)!;
+    console.log(`[VoiceChat] Creating peer connection for ${targetSocketId} (initiator: ${initiator})`);
 
     const pc = new RTCPeerConnection({ iceServers });
 
@@ -65,7 +69,30 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
       if (e.candidate) socket?.emit('voice:ice-candidate', { targetSocketId, candidate: e.candidate });
     };
 
+    pc.oniceconnectionstatechange = () => {
+        console.log(`[VoiceChat] ICE state for ${targetSocketId}: ${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+            console.warn(`[VoiceChat] ICE connection failed/disconnected for ${targetSocketId}, attempting restart...`);
+            // Optionally trigger a new offer with iceRestart: true
+            pc.restartIce();
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        console.log(`[VoiceChat] Peer connection state for ${targetSocketId}: ${pc.connectionState}`);
+        if (pc.connectionState === 'failed') {
+            console.error(`[VoiceChat] Peer connection failed for ${targetSocketId}`);
+        }
+    };
+
     pc.ontrack = (e) => {
+      const remoteStream = e.streams[0];
+      if (!remoteStream) {
+        console.warn(`[VoiceChat] Received track from ${targetSocketId} but no stream was found`);
+        return;
+      }
+      console.log(`[VoiceChat] Received track from ${targetSocketId}, tracks:`, remoteStream.getTracks().map(t => t.kind));
+      
       // Append to DOM to prevent garbage collection
       let audio = document.getElementById(`audio-${targetSocketId}`) as HTMLAudioElement;
       if (!audio) {
@@ -74,7 +101,14 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
         audio.autoplay = true;
         document.body.appendChild(audio);
       }
-      audio.srcObject = e.streams[0];
+      
+      if (audio.srcObject !== remoteStream) {
+        audio.srcObject = remoteStream;
+        audio.play().catch(err => {
+            console.error('[VoiceChat] Failed to play audio element:', err);
+            // Click to unlock might be needed
+        });
+      }
     };
 
     if (initiator) {
@@ -96,16 +130,39 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
 
   const startVoice = useCallback(async () => {
     if (isJoinedRef.current || streamRef.current) return;
+    console.log('[VoiceChat] Starting voice...');
+    signalingReadyRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }, video: false });
       streamRef.current = stream;
       stream.getAudioTracks().forEach(t => t.enabled = !isMuted);
       startSpeakingDetection(stream);
       
       setIsJoined(true);
       isJoinedRef.current = true;
-      sessionStorage.setItem(`voice_joined_${roomCode}`, 'true');
+      setVoiceJoined(roomCode, true);
+      console.log('[VoiceChat] Voice started successfully');
+
+      // Process any buffered offers
+      offersBufferRef.current.forEach((offer, fromSocketId) => {
+          console.log(`[VoiceChat] Processing buffered offer from ${fromSocketId}`);
+          // Trigger the offer handling logic (manually or by emitting a simulated event)
+          // For simplicity, we can just call createPeer and let the signaling flow
+          const pc = createPeer(fromSocketId, false);
+          pc.setRemoteDescription(new RTCSessionDescription(offer)).then(async () => {
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              socket?.emit('voice:answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
+          });
+      });
+      offersBufferRef.current.clear();
     } catch (e: any) {
+      console.error('[VoiceChat] Microphone access denied:', e);
+      signalingReadyRef.current = false;
       setMicError(e.message || 'Microphone access denied');
     }
   }, [isMuted, startSpeakingDetection, roomCode]);
@@ -120,10 +177,28 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
 
   // Auto-reconnect on mount if they were in voice before refresh
   useEffect(() => {
-    if (socket && sessionStorage.getItem(`voice_joined_${roomCode}`) === 'true') {
+    if (socket && isVoiceJoined(roomCode)) {
       startVoice();
     }
   }, [socket, roomCode, startVoice]);
+
+  // Handle Page Visibility (Background Tab)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[VoiceChat] Tab became visible, checking tracks...');
+        streamRef.current?.getAudioTracks().forEach(track => {
+            if (track.readyState === 'ended') {
+                console.warn('[VoiceChat] Track ended in background, restarting...');
+                // We might need to restart voice if tracks are dead
+            }
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   const toggleMute = useCallback(() => {
     setIsMuted(prev => {
@@ -138,7 +213,16 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
     if (!socket) return;
 
     socket.on('voice:offer', async ({ fromSocketId, offer }) => {
-      if (!isJoinedRef.current) return; // ONLY accept WebRTC if we have explicitly joined Voice Chat
+      if (!signalingReadyRef.current) {
+          console.log(`[VoiceChat] Ignoring offer from ${fromSocketId} - voice chat not joined`);
+          return;
+      }
+
+      if (!streamRef.current) {
+          console.log(`[VoiceChat] Buffering offer from ${fromSocketId} - local stream not ready`);
+          offersBufferRef.current.set(fromSocketId, offer);
+          return;
+      }
 
       const pc = createPeer(fromSocketId, false);
       const polite = (socket.id || '') < fromSocketId; // Polite peer resolves collisions
@@ -151,6 +235,17 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
 
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        console.log(`[VoiceChat] Remote description set for ${fromSocketId}`);
+
+        // Apply buffered candidates
+        const buffered = candidatesBufferRef.current.get(fromSocketId) || [];
+        for (const candidate of buffered) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
+            console.error(`[VoiceChat] Failed to add buffered candidate for ${fromSocketId}:`, e);
+          });
+        }
+        candidatesBufferRef.current.delete(fromSocketId);
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socket.emit('voice:answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
@@ -164,6 +259,16 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          console.log(`[VoiceChat] Remote answer set for ${fromSocketId}`);
+
+          // Apply buffered candidates
+          const buffered = candidatesBufferRef.current.get(fromSocketId) || [];
+          for (const candidate of buffered) {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
+              console.error(`[VoiceChat] Failed to add buffered candidate for ${fromSocketId}:`, e);
+            });
+          }
+          candidatesBufferRef.current.delete(fromSocketId);
         } catch (err) {
           console.error('Failed to set remote answer:', err);
         }
@@ -173,6 +278,14 @@ export function useVoiceChat({ socket, roomCode, userId, users }: UseVoiceChatOp
     socket.on('voice:ice-candidate', async ({ fromSocketId, candidate }) => {
       const pc = peersRef.current.get(fromSocketId);
       if (pc) {
+        if (!pc.remoteDescription) {
+          console.log(`[VoiceChat] Buffering candidate for ${fromSocketId}`);
+          const buffer = candidatesBufferRef.current.get(fromSocketId) || [];
+          buffer.push(candidate);
+          candidatesBufferRef.current.set(fromSocketId, buffer);
+          return;
+        }
+
         try {
           const ignoreOffer = ignoreOfferRef.current.get(fromSocketId);
           await pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {

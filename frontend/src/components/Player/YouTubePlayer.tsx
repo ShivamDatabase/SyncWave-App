@@ -50,7 +50,7 @@ export default function YouTubePlayer({
 }: Props) {
   const playerRef    = useRef<YT.Player | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isReadyRef   = useRef(false);
+  const [isReady, setIsReady] = useState(false);
   const lastVideoId  = useRef<string | null>(null);
   const intervalRef  = useRef<NodeJS.Timeout | null>(null);
   const isLocalAction = useRef(false);
@@ -75,11 +75,11 @@ export default function YouTubePlayer({
   // Sync volume slider → YouTube player volume in real-time
   useEffect(() => {
     volumeRef.current = volume;
-    if (isReadyRef.current) {
+    if (isReady && playerRef.current) {
       safeCall(playerRef.current, 'unMute');
       safeCall(playerRef.current, 'setVolume', volume);
     }
-  }, [volume]);
+  }, [volume, isReady]);
 
   // ── Load IFrame API once ────────────────────────────────────────────────────
   useEffect(() => {
@@ -101,7 +101,8 @@ export default function YouTubePlayer({
         },
         events: {
           onReady: () => {
-            isReadyRef.current = true;
+            console.log('[YouTubePlayer] Player ready');
+            setIsReady(true);
             setYtError(null);
             // Immediately unmute + set volume so audio works from the start
             safeCall(playerRef.current, 'unMute');
@@ -113,7 +114,7 @@ export default function YouTubePlayer({
               if (typeof dt === 'number' && dt > 0) {
                 onDurationChange?.(dt);
               }
-              const t = (playerRef.current as any)?.getCurrentTime?.();
+              const t = (playerRef.current as any)?.getCurrentTime?.() ?? 0;
               if (typeof t === 'number') onTimeUpdate(t);
             }, 1000);
           },
@@ -126,6 +127,7 @@ export default function YouTubePlayer({
             if (e.data === window.YT.PlayerState.ENDED)   onEndedRef.current();
           },
           onError: (e: { data: number }) => {
+            console.error('[YouTubePlayer] Error:', e.data);
             const msg = YT_ERRORS[e.data] ?? `YouTube error (code ${e.data}).`;
             setYtError(msg);
             // Auto-skip after a short delay so admin's client moves to next song
@@ -148,10 +150,8 @@ export default function YouTubePlayer({
     }
 
     // Workaround for strict browser autoplay policies:
-    // Because Play requests come from WebSockets, the browser considers them non-user-gestures 
-    // and forces it to be muted. Any click anywhere on the page can securely perform the unMute.
     const unlockAudio = () => {
-      if (isReadyRef.current && playerRef.current) {
+      if (playerRef.current && typeof (playerRef.current as any).unMute === 'function') {
         safeCall(playerRef.current, 'unMute');
         safeCall(playerRef.current, 'setVolume', volumeRef.current);
       }
@@ -163,40 +163,62 @@ export default function YouTubePlayer({
       document.removeEventListener('click', unlockAudio);
       document.removeEventListener('touchstart', unlockAudio);
       if (intervalRef.current) clearInterval(intervalRef.current);
-      isReadyRef.current = false;
+      setIsReady(false);
       playerRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Load new video when videoId changes ─────────────────────────────────────
+  // ── Load new video when videoId changes or player becomes ready ─────────────
   useEffect(() => {
-    if (!isReadyRef.current || !videoId) return;
+    if (!isReady || !videoId || !playerRef.current) return;
+    
     if (videoId !== lastVideoId.current) {
+      console.log(`[YouTubePlayer] Loading video: ${videoId}`);
       lastVideoId.current = videoId;
-      setYtError(null);          // clear previous error
+      setYtError(null);
       isLocalAction.current = true;
       safeCall(playerRef.current, 'loadVideoById', videoId, 0);
     }
-  }, [videoId]);
+  }, [videoId, isReady]);
 
   // ── Sync playback state from server ─────────────────────────────────────────
   useEffect(() => {
-    if (!isReadyRef.current || !videoId) return;
+    if (!isReady || !videoId || !playerRef.current) return;
 
-    const elapsed    = (Date.now() - new Date(playbackState.updatedAt).getTime()) / 1000;
+    // Use a simple sync: if playing, calculate expected current time based on server's update
+    const now = Date.now();
+    const updatedAt = new Date(playbackState.updatedAt).getTime();
+    let elapsed = (now - updatedAt) / 1000;
+    
+    // If elapsed is negative, it means client clock is ahead of server
+    // We treat it as 0 to avoid jumping backwards
+    if (elapsed < 0) {
+        console.log(`[YouTubePlayer] Client clock ahead of server by ${Math.abs(elapsed).toFixed(2)}s`);
+        elapsed = 0;
+    }
+
     const serverTime = playbackState.currentTime + (playbackState.isPlaying ? elapsed : 0);
-    const current    = (playerRef.current as any)?.getCurrentTime?.() ?? 0;
-    const drift      = Math.abs(current - serverTime);
+    const current = (playerRef.current as any)?.getCurrentTime?.() ?? 0;
+    const drift = Math.abs(current - serverTime);
 
-    isLocalAction.current = true;
-    if (drift > 2) safeCall(playerRef.current, 'seekTo', serverTime, true);
+    // Only sync if drift is significant (avoiding stutter from minor clock differences)
+    // Increased threshold from 2 to 3 seconds for better stability with clock skew
+    if (drift > 3) {
+      console.log(`[YouTubePlayer] Syncing: drift=${drift.toFixed(2)}s, seeking to ${serverTime.toFixed(2)}s`);
+      isLocalAction.current = true;
+      safeCall(playerRef.current, 'seekTo', serverTime, true);
+    }
 
     if (playbackState.isPlaying) {
-      safeCall(playerRef.current, 'unMute');
-      safeCall(playerRef.current, 'setVolume', volumeRef.current);
-      safeCall(playerRef.current, 'playVideo');
+      if ((playerRef.current as any)?.getPlayerState?.() !== window.YT.PlayerState.PLAYING) {
+        isLocalAction.current = true;
+        safeCall(playerRef.current, 'playVideo');
+      }
     } else {
-      safeCall(playerRef.current, 'pauseVideo');
+      if ((playerRef.current as any)?.getPlayerState?.() === window.YT.PlayerState.PLAYING) {
+        isLocalAction.current = true;
+        safeCall(playerRef.current, 'pauseVideo');
+      }
     }
   }, [playbackState, videoId]);
 
